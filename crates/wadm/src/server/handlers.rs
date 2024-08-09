@@ -16,7 +16,7 @@ use wadm_types::{
     },
     CapabilityProperties, Manifest, Properties,
 };
-use wadm_types::{ComponentProperties, LATEST_VERSION};
+use wadm_types::{ComponentProperties, SharedManifestComponentProperties, LATEST_VERSION};
 
 use crate::{model::StoredManifest, publisher::Publisher};
 
@@ -92,6 +92,58 @@ impl<P: Publisher> Handler<P> {
 
         if let Some(error_message) = validate_manifest(manifest.clone()).await.err() {
             self.send_error(msg.reply, error_message.to_string()).await;
+            return;
+        }
+
+        let all_manifests: Vec<Manifest> = self
+            .store
+            .list(account_id, lattice_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|manifest| manifest.get_current().shared())
+            // TODO: Do we need to just get deployed here? I assume that would be a warning if not deployed
+            .map(|manifest| manifest.get_current().clone())
+            .collect();
+
+        // TODO: We are also going to have to ensure that links don't clobber other links. Specifically
+        // this relates to the uniqueness properties of a source/target/interface/etc for a link.
+
+        // Ensure that all shared components are present in other (deployed?) manifests that are
+        // marked as shared manifests
+        let shared_components = manifest
+            .components()
+            // Find all shared components
+            .filter_map(|c| match &c.properties {
+                Properties::Capability {
+                    properties:
+                        CapabilityProperties {
+                            image: None,
+                            manifest: Some(manifest_properties),
+                            ..
+                        },
+                } => Some(manifest_properties),
+                Properties::Component {
+                    properties:
+                        ComponentProperties {
+                            image: None,
+                            manifest: Some(manifest_properties),
+                            ..
+                        },
+                } => Some(manifest_properties),
+                _ => None,
+            })
+            .any(|properties| {
+                // TODO: ensure that the type of the property is preserved, e.g. component -> component
+                all_manifests.iter().any(|m| {
+                    m.metadata.name == properties.name
+                        && m.components().any(|c| c.name == properties.component)
+                })
+            });
+
+        if !shared_components {
+            self.send_error(msg.reply, "shared component not found".to_string())
+                .await;
             return;
         }
 

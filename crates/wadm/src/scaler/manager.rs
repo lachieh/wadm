@@ -606,24 +606,30 @@ where
                     config_names.append(&mut secret_names.clone());
                     match (trt.trait_type.as_str(), &trt.properties) {
                         (SPREADSCALER_TRAIT, TraitProperty::SpreadScaler(p)) => {
-                            Some(Box::new(BackoffAwareScaler::new(
-                                ComponentSpreadScaler::new(
-                                    snapshot_data.clone(),
-                                    props.image.to_owned(),
-                                    component_id,
-                                    lattice_id.to_owned(),
-                                    name.to_owned(),
-                                    p.to_owned(),
-                                    &component.name,
-                                    config_names,
-                                ),
-                                notifier.to_owned(),
-                                config_scalers,
-                                secret_scalers,
-                                notifier_subject,
-                                name,
-                                Some(Duration::from_secs(5)),
-                            )) as BoxedScaler)
+                            // If the image is not specified, then it's a reference to a shared provider
+                            // in a different manifest
+                            // TODO: consider bailing here if image is None and manifest is None
+                            // TODO: Still need to create config and secrets though, consider how to do that
+                            props.image.to_owned().map(|image_ref| {
+                                Box::new(BackoffAwareScaler::new(
+                                    ComponentSpreadScaler::new(
+                                        snapshot_data.clone(),
+                                        image_ref,
+                                        component_id,
+                                        lattice_id.to_owned(),
+                                        name.to_owned(),
+                                        p.to_owned(),
+                                        &component.name,
+                                        config_names,
+                                    ),
+                                    notifier.to_owned(),
+                                    config_scalers,
+                                    secret_scalers,
+                                    notifier_subject,
+                                    name,
+                                    Some(Duration::from_secs(5)),
+                                )) as BoxedScaler
+                            })
                         }
                         (DAEMONSCALER_TRAIT, TraitProperty::SpreadScaler(p)) => {
                             Some(Box::new(BackoffAwareScaler::new(

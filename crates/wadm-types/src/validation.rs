@@ -335,6 +335,7 @@ pub async fn validate_manifest(manifest: &Manifest) -> Result<Vec<ValidationFail
     failures.extend(check_misnamed_interfaces(manifest));
     failures.extend(check_dangling_links(manifest));
     failures.extend(validate_policies(manifest));
+    failures.extend(validate_component_properties(manifest));
     Ok(failures)
 }
 
@@ -559,6 +560,61 @@ fn validate_policies(manifest: &Manifest) -> Vec<ValidationFailure> {
                     ),
                 )),
             }
+        }
+    }
+    failures
+}
+
+/// Ensure that all components in a manifest either specify an image reference or a shared
+/// component in a different manifest. Note that this does not validate that the image reference
+/// is valid or that the shared component is valid, only that one of the two properties is set.
+pub fn validate_component_properties(manifest: &Manifest) -> Vec<ValidationFailure> {
+    let mut failures = Vec::new();
+    for component in manifest.spec.components.iter() {
+        match &component.properties {
+            Properties::Component {
+                properties:
+                    ComponentProperties {
+                        image,
+                        manifest,
+                        config,
+                        ..
+                    },
+            }
+            | Properties::Capability {
+                properties:
+                    CapabilityProperties {
+                        image,
+                        manifest,
+                        config,
+                        ..
+                    },
+            } => match (image, manifest) {
+                (Some(_), Some(_)) => {
+                    failures.push(ValidationFailure::new(
+                        ValidationFailureLevel::Error,
+                        "Component cannot have both 'image' and 'manifest' properties".into(),
+                    ));
+                }
+                (None, None) => {
+                    failures.push(ValidationFailure::new(
+                        ValidationFailureLevel::Error,
+                        "Component must have either 'image' or 'manifest' property".into(),
+                    ));
+                }
+                // NOTE: This is a problem because of our left-folding config implementation. A shared manifest
+                // could specify additional config and actually overwrite the original manifest's config.
+                (None, Some(shared_properties)) if !config.is_empty() => {
+                    failures.push(ValidationFailure::new(
+                        ValidationFailureLevel::Error,
+                        format!(
+                            "Shared component '{}' cannot specify additional 'config'",
+                            shared_properties.name
+                        ),
+                    ));
+                }
+                _ => {}
+            },
         }
     }
     failures

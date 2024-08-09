@@ -24,6 +24,8 @@ pub const VERSION_ANNOTATION_KEY: &str = "version";
 /// The description key, as predefined by the [OAM
 /// spec](https://github.com/oam-dev/spec/blob/master/metadata.md#annotations-format)
 pub const DESCRIPTION_ANNOTATION_KEY: &str = "description";
+/// The annotation key for shared manifests
+pub const SHARED_ANNOTATION_KEY: &str = "wasmcloud.dev/shared";
 /// The identifier for the builtin spreadscaler trait type
 pub const SPREADSCALER_TRAIT: &str = "spreadscaler";
 /// The identifier for the builtin daemonscaler trait type
@@ -65,6 +67,14 @@ impl Manifest {
             .annotations
             .get(DESCRIPTION_ANNOTATION_KEY)
             .map(|v| v.as_str())
+    }
+
+    /// Indicates if the manifest is shared, meaning it can be used by multiple applications
+    pub fn shared(&self) -> bool {
+        self.metadata
+            .annotations
+            .get(SHARED_ANNOTATION_KEY)
+            .is_some_and(|v| v.parse::<bool>().unwrap_or(false))
     }
 
     /// Returns the components in the manifest
@@ -214,8 +224,12 @@ pub enum Properties {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentProperties {
-    /// The image reference to use
-    pub image: String,
+    /// The image reference to use. Required unless the component is a shared component
+    /// that is defined in another shared manifest.
+    pub image: Option<String>,
+    /// Information to locate a component within a shared manifest. Cannot be specified
+    /// if the image is specified.
+    pub manifest: Option<SharedManifestComponentProperties>,
     /// The component ID to use for this component. If not supplied, it will be generated
     /// as a combination of the [Metadata::name] and the image reference.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -266,8 +280,12 @@ pub struct SecretSourceProperty {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityProperties {
-    /// The image reference to use
-    pub image: String,
+    /// The image reference to use. Required unless the component is a shared component
+    /// that is defined in another shared manifest.
+    pub image: Option<String>,
+    /// Information to locate a component within a shared manifest. Cannot be specified
+    /// if the image is specified.
+    pub manifest: Option<SharedManifestComponentProperties>,
     /// The component ID to use for this provider. If not supplied, it will be generated
     /// as a combination of the [Metadata::name] and the image reference.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -280,6 +298,14 @@ pub struct CapabilityProperties {
     /// these values at runtime using `wasmcloud:secrets/store`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<SecretProperty>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, JsonSchema)]
+pub struct SharedManifestComponentProperties {
+    /// The name of the shared manifest
+    pub name: String,
+    /// The name of the component in the shared manifest
+    pub component: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, JsonSchema)]
@@ -683,7 +709,7 @@ mod test {
                     &component.properties,
                     Properties::Capability {
                         properties: CapabilityProperties { image, .. }
-                    } if image == "wasmcloud.azurecr.io/httpserver:0.13.1"
+                    } if image.clone().expect("image to be present") == "wasmcloud.azurecr.io/httpserver:0.13.1"
                 )
             })
             .expect("Should find capability component")
@@ -751,7 +777,8 @@ mod test {
             name: "userinfo".to_string(),
             properties: Properties::Component {
                 properties: ComponentProperties {
-                    image: "wasmcloud.azurecr.io/fake:1".to_string(),
+                    image: Some("wasmcloud.azurecr.io/fake:1".to_string()),
+                    manifest: None,
                     id: None,
                     config: vec![],
                     secrets: vec![],
@@ -764,7 +791,8 @@ mod test {
             name: "webcap".to_string(),
             properties: Properties::Capability {
                 properties: CapabilityProperties {
-                    image: "wasmcloud.azurecr.io/httpserver:0.13.1".to_string(),
+                    image: Some("wasmcloud.azurecr.io/httpserver:0.13.1".to_string()),
+                    manifest: None,
                     id: None,
                     config: vec![],
                     secrets: vec![],
@@ -792,7 +820,8 @@ mod test {
             name: "ledblinky".to_string(),
             properties: Properties::Capability {
                 properties: CapabilityProperties {
-                    image: "wasmcloud.azurecr.io/ledblinky:0.0.1".to_string(),
+                    image: Some("wasmcloud.azurecr.io/ledblinky:0.0.1".to_string()),
+                    manifest: None,
                     id: None,
                     config: vec![],
                     secrets: vec![],
